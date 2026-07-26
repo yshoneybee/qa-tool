@@ -43,7 +43,7 @@ def md_to_excel(md_str):
 # ==========================================
 def init_app():
     st.set_page_config(page_title="실무 기획/QA 추출기", layout="wide")
-    st.title("⚡ 실무 기획 & TC 추출기 v4")
+    st.title("⚡ 실무 기획 & TC 추출기 v5")
     
     if 'tab1_imgs' not in st.session_state: st.session_state['tab1_imgs'] = []
     if 'tab1_res' not in st.session_state: st.session_state['tab1_res'] = None
@@ -52,13 +52,12 @@ def init_app():
     if 'tab2_res' not in st.session_state: st.session_state['tab2_res'] = None
 
 # ==========================================
-# 2. 개별 이미지 삭제 UI 생성 함수 (신규)
+# 2. 개별 이미지 삭제 UI 생성 함수
 # ==========================================
 def display_images_with_delete(state_key):
     imgs_list = st.session_state[state_key]
     if not imgs_list: return
     
-    # 한 줄에 최대 5개씩 쪼개서 배치 (가독성 방어 및 개별 삭제 버튼 부여)
     cols_per_row = 5
     for i in range(0, len(imgs_list), cols_per_row):
         row_imgs = imgs_list[i:i+cols_per_row]
@@ -72,12 +71,12 @@ def display_images_with_delete(state_key):
                     st.rerun()
 
 # ==========================================
-# 3. AI 호출 로직 (Gemini 모델명 패치)
+# 3. AI 호출 로직 (Flash 모델로 강제 고정 - 404 에러 원천 차단)
 # ==========================================
 def run_gemini(api_key, prompt, images=[]):
     genai.configure(api_key=api_key)
-    # 404 에러 방지: 구글 최신 강제 규격 반영
-    model = genai.GenerativeModel('gemini-1.5-pro-latest')
+    # Pro 모델 차단(404) 문제 해결을 위해, 100% 열려있는 Flash 모델로 고정
+    model = genai.GenerativeModel('gemini-1.5-flash')
     response = model.generate_content([prompt] + images)
     return response.text
 
@@ -139,7 +138,7 @@ def main():
     init_app()
     with st.sidebar:
         st.header("🔑 API 키 설정")
-        gemini_key = st.text_input("Gemini API Key", type="password")
+        gemini_key = st.text_input("Gemini API Key (Flash 모델 자동적용)", type="password")
         claude_key = st.text_input("Claude API Key", type="password")
 
     tab1, tab2 = st.tabs(["🖼️ 1. 빠른 초안 (이미지 전용)", "📝 2. 정밀 분석 (정책 + 이미지)"])
@@ -157,16 +156,14 @@ def main():
                 st.session_state['tab1_imgs'] = []
                 st.rerun()
 
-        # 중복 이미지 도배 방지 로직 (마지막 추가된 이미지와 다를 때만 append)
         if paste_res1.image_data is not None:
             if not st.session_state['tab1_imgs'] or st.session_state['tab1_imgs'][-1] != paste_res1.image_data:
                 st.session_state['tab1_imgs'].append(paste_res1.image_data)
                 
-        # 개별 삭제 버튼이 포함된 이미지 그리드 호출
         display_images_with_delete('tab1_imgs')
         
         st.divider()
-        model_t1 = st.radio("🧠 AI 뇌 선택:", ["Claude 3.5 Sonnet (논리력 최강)", "Gemini 1.5 Pro (속도/가성비)"], horizontal=True, key="mod1")
+        model_t1 = st.radio("🧠 AI 뇌 선택:", ["Claude 3.5 Sonnet (논리력 최강)", "Gemini 1.5 Flash (속도/가성비)"], horizontal=True, key="mod1")
         
         c1, c2 = st.columns(2)
         if c1.button("📄 기능 명세서 뽑기", use_container_width=True, type="primary"):
@@ -205,11 +202,10 @@ def main():
                 if not st.session_state['tab2_imgs'] or st.session_state['tab2_imgs'][-1] != paste_res2.image_data:
                     st.session_state['tab2_imgs'].append(paste_res2.image_data)
                 
-            # 개별 삭제 버튼이 포함된 이미지 그리드 호출
             display_images_with_delete('tab2_imgs')
 
         st.divider()
-        model_t2 = st.radio("🧠 AI 뇌 선택:", ["Claude 3.5 Sonnet (논리력 최강)", "Gemini 1.5 Pro (속도/가성비)"], horizontal=True, key="mod2")
+        model_t2 = st.radio("🧠 AI 뇌 선택:", ["Claude 3.5 Sonnet (논리력 최강)", "Gemini 1.5 Flash (속도/가성비)"], horizontal=True, key="mod2")
         
         c3, c4 = st.columns(2)
         if c3.button("📄 교차 검증 명세서 뽑기", use_container_width=True, type="primary"):
