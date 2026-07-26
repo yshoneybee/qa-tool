@@ -43,7 +43,7 @@ def md_to_excel(md_str):
 # ==========================================
 def init_app():
     st.set_page_config(page_title="실무 기획/QA 추출기", layout="wide")
-    st.title("⚡ 실무 기획 & TC 추출기 v3")
+    st.title("⚡ 실무 기획 & TC 추출기 v4")
     
     if 'tab1_imgs' not in st.session_state: st.session_state['tab1_imgs'] = []
     if 'tab1_res' not in st.session_state: st.session_state['tab1_res'] = None
@@ -52,11 +52,32 @@ def init_app():
     if 'tab2_res' not in st.session_state: st.session_state['tab2_res'] = None
 
 # ==========================================
-# 2. AI 호출 로직
+# 2. 개별 이미지 삭제 UI 생성 함수 (신규)
+# ==========================================
+def display_images_with_delete(state_key):
+    imgs_list = st.session_state[state_key]
+    if not imgs_list: return
+    
+    # 한 줄에 최대 5개씩 쪼개서 배치 (가독성 방어 및 개별 삭제 버튼 부여)
+    cols_per_row = 5
+    for i in range(0, len(imgs_list), cols_per_row):
+        row_imgs = imgs_list[i:i+cols_per_row]
+        cols = st.columns(cols_per_row)
+        for j, img in enumerate(row_imgs):
+            idx = i + j
+            with cols[j]:
+                st.image(img, use_container_width=True, caption=f"첨부 {idx+1}")
+                if st.button("❌ 삭제", key=f"del_{state_key}_{idx}", use_container_width=True):
+                    st.session_state[state_key].pop(idx)
+                    st.rerun()
+
+# ==========================================
+# 3. AI 호출 로직 (Gemini 모델명 패치)
 # ==========================================
 def run_gemini(api_key, prompt, images=[]):
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-pro')
+    # 404 에러 방지: 구글 최신 강제 규격 반영
+    model = genai.GenerativeModel('gemini-1.5-pro-latest')
     response = model.generate_content([prompt] + images)
     return response.text
 
@@ -89,42 +110,33 @@ def generate_content(model, gemini_key, claude_key, prompt, images):
         return run_gemini(gemini_key, prompt, images)
 
 # ==========================================
-# 3. 결과 출력 컴포넌트 (엑셀 + 복붙 영역)
+# 4. 결과 출력 컴포넌트
 # ==========================================
 def display_results(result_text, key_prefix):
     st.success("✅ 추출 완료!")
-    
-    # 엑셀 다운로드 버튼
     excel_data = md_to_excel(result_text)
     if excel_data:
         st.download_button(
             "📊 엑셀 파일로 다운로드", 
-            data=excel_data, 
-            file_name="기획_TC_추출결과.xlsx", 
+            data=excel_data, file_name="기획_TC_추출결과.xlsx", 
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
             key=f"{key_prefix}_dl"
         )
-    
     st.divider()
-    
-    # 좌우 단 나누기 (좌: 미리보기 / 우: 복붙 전용 텍스트)
     col_preview, col_copy = st.columns(2)
-    
     with col_preview:
         st.markdown("### 👀 화면 미리보기")
         st.markdown(result_text)
-        
     with col_copy:
         st.markdown("### 📋 복사(Ctrl+C) 전용 텍스트")
         st.caption("아래 입력창 안을 클릭하고 `Ctrl+A` (전체선택) 후 `Ctrl+C` 하시면 깔끔하게 복사됩니다.")
         st.text_area("결과 텍스트", value=result_text, height=400, key=f"{key_prefix}_copy", label_visibility="collapsed")
 
 # ==========================================
-# 4. 메인 UI
+# 5. 메인 UI
 # ==========================================
 def main():
     init_app()
-    
     with st.sidebar:
         st.header("🔑 API 키 설정")
         gemini_key = st.text_input("Gemini API Key", type="password")
@@ -137,7 +149,6 @@ def main():
     # ------------------------------------------
     with tab1:
         st.markdown("디자인 시안 캡처본만으로 기획 명세서나 TC 초안을 엑셀로 뽑아냅니다.")
-        
         c_btn, c_clear = st.columns([1, 4])
         with c_btn:
             paste_res1 = paste_image_button(label="📋 화면 붙여넣기", background_color="#FF4B4B", key="btn1")
@@ -146,11 +157,13 @@ def main():
                 st.session_state['tab1_imgs'] = []
                 st.rerun()
 
+        # 중복 이미지 도배 방지 로직 (마지막 추가된 이미지와 다를 때만 append)
         if paste_res1.image_data is not None:
-            st.session_state['tab1_imgs'].append(paste_res1.image_data)
-            
-        if st.session_state['tab1_imgs']:
-            st.image(st.session_state['tab1_imgs'], width=200, caption=[f"첨부 {i+1}" for i in range(len(st.session_state['tab1_imgs']))])
+            if not st.session_state['tab1_imgs'] or st.session_state['tab1_imgs'][-1] != paste_res1.image_data:
+                st.session_state['tab1_imgs'].append(paste_res1.image_data)
+                
+        # 개별 삭제 버튼이 포함된 이미지 그리드 호출
+        display_images_with_delete('tab1_imgs')
         
         st.divider()
         model_t1 = st.radio("🧠 AI 뇌 선택:", ["Claude 3.5 Sonnet (논리력 최강)", "Gemini 1.5 Pro (속도/가성비)"], horizontal=True, key="mod1")
@@ -176,11 +189,9 @@ def main():
     # ------------------------------------------
     with tab2:
         st.markdown("컨플루언스 정책과 피그마 화면을 교차 검증하여 결함 없는 명세서나 TC를 뽑아냅니다.")
-        
         col_req, col_img = st.columns(2)
         with col_req:
             req_text = st.text_area("기획 명세서 / 정책 복붙", height=300)
-            
         with col_img:
             c_btn2, c_clear2 = st.columns([1, 1])
             with c_btn2:
@@ -191,10 +202,11 @@ def main():
                     st.rerun()
                     
             if paste_res2.image_data is not None:
-                st.session_state['tab2_imgs'].append(paste_res2.image_data)
+                if not st.session_state['tab2_imgs'] or st.session_state['tab2_imgs'][-1] != paste_res2.image_data:
+                    st.session_state['tab2_imgs'].append(paste_res2.image_data)
                 
-            if st.session_state['tab2_imgs']:
-                st.image(st.session_state['tab2_imgs'], width=200, caption=[f"첨부 {i+1}" for i in range(len(st.session_state['tab2_imgs']))])
+            # 개별 삭제 버튼이 포함된 이미지 그리드 호출
+            display_images_with_delete('tab2_imgs')
 
         st.divider()
         model_t2 = st.radio("🧠 AI 뇌 선택:", ["Claude 3.5 Sonnet (논리력 최강)", "Gemini 1.5 Pro (속도/가성비)"], horizontal=True, key="mod2")
