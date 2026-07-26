@@ -43,7 +43,7 @@ def md_to_excel(md_str):
 # ==========================================
 def init_app():
     st.set_page_config(page_title="실무 기획/QA 추출기", layout="wide")
-    st.title("⚡ 실무 기획 & TC 추출기 v8")
+    st.title("⚡ 실무 기획 & TC 추출기 v9")
     
     if 'tab1_imgs' not in st.session_state: st.session_state['tab1_imgs'] = []
     if 'tab1_res' not in st.session_state: st.session_state['tab1_res'] = None
@@ -71,9 +71,9 @@ def display_images_with_delete(state_key):
                     st.rerun()
 
 # ==========================================
-# 3. AI 호출 로직 (Pro / Flash 명시적 분리)
+# 3. AI 호출 로직 (API 변경점 반영: -latest 꼬리표 강제)
 # ==========================================
-def run_gemini(api_key, prompt, images=[], model_name="gemini-1.5-flash"):
+def run_gemini(api_key, prompt, images=[], model_name="gemini-1.5-flash-latest"):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(model_name)
     response = model.generate_content([prompt] + images)
@@ -111,14 +111,14 @@ def generate_content_safe(model_choice, gemini_key, claude_key, prompt, images):
             if not gemini_key: 
                 st.warning("🚨 왼쪽 사이드바에 Gemini API 키를 입력하세요.")
                 return None
-            # 무료 한도(2 RPM) 주의 요망
-            return run_gemini(gemini_key, prompt, images, model_name="gemini-1.5-pro")
-        else: # Flash 선택 시
+            # 구글 최신 규격 반영 (-latest)
+            return run_gemini(gemini_key, prompt, images, model_name="gemini-1.5-pro-latest")
+        else: 
             if not gemini_key: 
                 st.warning("🚨 왼쪽 사이드바에 Gemini API 키를 입력하세요.")
                 return None
-            # 속도 빠르고 한도 넉넉함(15 RPM)
-            return run_gemini(gemini_key, prompt, images, model_name="gemini-1.5-flash")
+            # 구글 최신 규격 반영 (-latest)
+            return run_gemini(gemini_key, prompt, images, model_name="gemini-1.5-flash-latest")
             
     except Exception as e:
         error_msg = str(e)
@@ -127,7 +127,8 @@ def generate_content_safe(model_choice, gemini_key, claude_key, prompt, images):
         elif "401" in error_msg or "403" in error_msg or "authentication" in error_msg.lower() or "credit" in error_msg.lower():
             st.error("🚨 [인증 실패] API 키가 잘못되었거나 계정에 충전된 크레딧이 없습니다.")
         elif "404" in error_msg:
-            st.error("🚨 [모델 접근 불가] 해당 모델(Pro)을 현재 API 키의 권한으로 호출할 수 없습니다. Flash 모델을 이용해주세요.")
+            # 멍청한 하드코딩 제거, 실제 에러 원인 표출
+            st.error(f"🚨 [구글 API 연결 실패] 해당 모델을 구글 서버에서 찾을 수 없습니다. (원문: {error_msg})")
         else:
             st.error(f"🚨 에러 발생: {error_msg}")
         return None
