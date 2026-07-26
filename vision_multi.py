@@ -43,7 +43,7 @@ def md_to_excel(md_str):
 # ==========================================
 def init_app():
     st.set_page_config(page_title="실무 기획/QA 추출기", layout="wide")
-    st.title("⚡ 실무 기획 & TC 추출기 v5")
+    st.title("⚡ 실무 기획 & TC 추출기 v6")
     
     if 'tab1_imgs' not in st.session_state: st.session_state['tab1_imgs'] = []
     if 'tab1_res' not in st.session_state: st.session_state['tab1_res'] = None
@@ -71,12 +71,23 @@ def display_images_with_delete(state_key):
                     st.rerun()
 
 # ==========================================
-# 3. AI 호출 로직 (Flash 모델로 강제 고정 - 404 에러 원천 차단)
+# 3. AI 호출 로직 (자동 탐지 및 예외처리 강화)
 # ==========================================
-def run_gemini(api_key, prompt, images=[]):
+def get_best_gemini_model(api_key):
     genai.configure(api_key=api_key)
-    # Pro 모델 차단(404) 문제 해결을 위해, 100% 열려있는 Flash 모델로 고정
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+    
+    # 사용 가능한 모델 중 가장 좋은 것부터 순차 탐색 (404 원천 차단)
+    for target in ["1.5-pro", "1.5-flash", "pro-vision", "gemini-pro"]:
+        for m in available_models:
+            if target in m:
+                return m.replace("models/", "")
+                
+    raise Exception(f"현재 API 키로 사용 가능한 비전(Vision) 모델이 없습니다. 사용 가능 목록: {available_models}")
+
+def run_gemini(api_key, prompt, images=[]):
+    best_model_name = get_best_gemini_model(api_key)
+    model = genai.GenerativeModel(best_model_name)
     response = model.generate_content([prompt] + images)
     return response.text
 
@@ -138,7 +149,7 @@ def main():
     init_app()
     with st.sidebar:
         st.header("🔑 API 키 설정")
-        gemini_key = st.text_input("Gemini API Key (Flash 모델 자동적용)", type="password")
+        gemini_key = st.text_input("Gemini API Key (자동 탐지)", type="password")
         claude_key = st.text_input("Claude API Key", type="password")
 
     tab1, tab2 = st.tabs(["🖼️ 1. 빠른 초안 (이미지 전용)", "📝 2. 정밀 분석 (정책 + 이미지)"])
@@ -163,7 +174,7 @@ def main():
         display_images_with_delete('tab1_imgs')
         
         st.divider()
-        model_t1 = st.radio("🧠 AI 뇌 선택:", ["Claude 3.5 Sonnet (논리력 최강)", "Gemini 1.5 Flash (속도/가성비)"], horizontal=True, key="mod1")
+        model_t1 = st.radio("🧠 AI 뇌 선택:", ["Claude 3.5 Sonnet (논리력 최강)", "Gemini (빠른 속도/자동 탐지)"], horizontal=True, key="mod1")
         
         c1, c2 = st.columns(2)
         if c1.button("📄 기능 명세서 뽑기", use_container_width=True, type="primary"):
@@ -205,7 +216,7 @@ def main():
             display_images_with_delete('tab2_imgs')
 
         st.divider()
-        model_t2 = st.radio("🧠 AI 뇌 선택:", ["Claude 3.5 Sonnet (논리력 최강)", "Gemini 1.5 Flash (속도/가성비)"], horizontal=True, key="mod2")
+        model_t2 = st.radio("🧠 AI 뇌 선택:", ["Claude 3.5 Sonnet (논리력 최강)", "Gemini (빠른 속도/자동 탐지)"], horizontal=True, key="mod2")
         
         c3, c4 = st.columns(2)
         if c3.button("📄 교차 검증 명세서 뽑기", use_container_width=True, type="primary"):
