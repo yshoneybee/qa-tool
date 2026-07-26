@@ -1,5 +1,7 @@
 streamlit
 pandas
-python-pptx
-requests
-openpyxl
+Pillow
+google-generativeai
+anthropic
+streamlit-paste-button
+xlsxwriter
