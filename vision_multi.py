@@ -9,16 +9,19 @@ from streamlit_paste_button import paste_image_button
 import re
 
 # ==========================================
-# 0. 엑셀 변환 로직 (Markdown Table -> Excel)
+# 0. 엑셀 변환 로직 (Markdown Table -> Excel 강화판)
 # ==========================================
 def md_to_excel(md_str):
     try:
-        lines = md_str.strip().split('\n')
+        # AI가 쓸데없이 붙이는 마크다운 코드블럭 기호 강제 제거
+        md_str = md_str.replace("```markdown", "").replace("```", "").strip()
+        lines = md_str.split('\n')
         data_lines = []
         for line in lines:
             line = line.strip()
             if not line or '|' not in line: continue
             content = line.replace('|', '').strip()
+            # 구분선(|---|---|) 제외
             if set(content).issubset({'-', ':', ' '}): continue
             data_lines.append(line)
         
@@ -43,7 +46,7 @@ def md_to_excel(md_str):
 # ==========================================
 def init_app():
     st.set_page_config(page_title="실무 기획/QA 추출기", layout="wide")
-    st.title("⚡ 실무 기획 & TC 추출기 v10")
+    st.title("⚡ 실무 기획 & TC 추출기 v11")
     
     if 'tab1_imgs' not in st.session_state: st.session_state['tab1_imgs'] = []
     if 'tab1_res' not in st.session_state: st.session_state['tab1_res'] = None
@@ -52,8 +55,12 @@ def init_app():
     if 'tab2_res' not in st.session_state: st.session_state['tab2_res'] = None
 
 # ==========================================
-# 2. 개별 이미지 삭제 UI 생성 함수
+# 2. 개별 이미지 삭제 콜백 로직 (오류 100% 해결)
 # ==========================================
+def delete_image(state_key, idx):
+    if state_key in st.session_state and len(st.session_state[state_key]) > idx:
+        st.session_state[state_key].pop(idx)
+
 def display_images_with_delete(state_key):
     imgs_list = st.session_state[state_key]
     if not imgs_list: return
@@ -66,40 +73,34 @@ def display_images_with_delete(state_key):
             idx = i + j
             with cols[j]:
                 st.image(img, use_container_width=True, caption=f"첨부 {idx+1}")
-                if st.button("❌ 삭제", key=f"del_{state_key}_{idx}", use_container_width=True):
-                    st.session_state[state_key].pop(idx)
-                    st.rerun()
+                # on_click 콜백을 사용해 렌더링 꼬임 현상 원천 차단
+                st.button("❌ 삭제", key=f"del_{state_key}_{idx}_{len(imgs_list)}", on_click=delete_image, args=(state_key, idx), use_container_width=True)
 
 # ==========================================
-# 3. AI 호출 로직 (404 원천 차단: 동적 모델 탐색)
+# 3. AI 호출 로직
 # ==========================================
 def run_gemini(api_key, prompt, images=[], model_type="flash"):
     genai.configure(api_key=api_key)
-    
-    # 1. 섭님 API 키로 사용 가능한 전체 모델 목록 조회
     available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
     target_model = None
     search_keyword = "1.5-pro" if model_type == "pro" else "1.5-flash"
     
-    # 2. 하드코딩 없이 목록에서 존재하는 모델 이름을 정확히 스캔해서 픽업
     for m in available_models:
         if search_keyword in m:
             target_model = m.replace("models/", "")
             break
             
-    # 혹시 1.5 버전이 없으면 그냥 pro/flash 단어 들어간 거 픽업
     if not target_model:
         for m in available_models:
             if model_type in m:
                 target_model = m.replace("models/", "")
                 break
                 
-    # 그래도 없으면 접근 가능한 첫 번째 모델 강제 할당 (404 에러 방어)
     if not target_model and available_models:
         target_model = available_models[0].replace("models/", "")
         
     if not target_model:
-        raise Exception(f"API 키로 접근할 수 있는 모델이 아예 없습니다. (목록: {available_models})")
+        raise Exception(f"API 키로 접근할 수 있는 모델이 아예 없습니다.")
         
     model = genai.GenerativeModel(target_model)
     response = model.generate_content([prompt] + images)
@@ -137,13 +138,11 @@ def generate_content_safe(model_choice, gemini_key, claude_key, prompt, images):
             if not gemini_key: 
                 st.warning("🚨 왼쪽 사이드바에 Gemini API 키를 입력하세요.")
                 return None
-            # 동적 탐색 (Pro)
             return run_gemini(gemini_key, prompt, images, model_type="pro")
         else: 
             if not gemini_key: 
                 st.warning("🚨 왼쪽 사이드바에 Gemini API 키를 입력하세요.")
                 return None
-            # 동적 탐색 (Flash)
             return run_gemini(gemini_key, prompt, images, model_type="flash")
             
     except Exception as e:
@@ -151,7 +150,7 @@ def generate_content_safe(model_choice, gemini_key, claude_key, prompt, images):
         if "429" in error_msg or "quota" in error_msg.lower():
             st.error("🚨 [무료 한도 초과] AI가 허용된 용량을 초과했습니다. 1~2분 뒤에 시도하시거나 Flash 모델을 선택해주세요.")
         elif "401" in error_msg or "403" in error_msg or "authentication" in error_msg.lower():
-            st.error("🚨 [인증 실패] API 키가 잘못되었거나 만료되었습니다.")
+            st.error("🚨 [인증 실패] API 키가 잘못되었거나 만료(또는 충전금액 부족)되었습니다.")
         else:
             st.error(f"🚨 에러 발생: {error_msg}")
         return None
@@ -180,7 +179,42 @@ def display_results(result_text, key_prefix):
         st.text_area("결과 텍스트", value=result_text, height=400, key=f"{key_prefix}_copy", label_visibility="collapsed")
 
 # ==========================================
-# 5. 메인 UI
+# 5. 프롬프트 정의 (흐름 분석 강화)
+# ==========================================
+PROMPT_SPEC = """첨부된 {count}장의 UI 이미지는 순서대로 이어지는 화면 흐름(메인->팝업->결과 등)을 나타냅니다.
+이 흐름을 분석하여 기능 명세서를 단 하나의 Markdown 표로 작성하세요.
+각 기능이나 UI 요소가 '몇 번째 첨부 이미지'에서 발생한 것인지 연관성을 명확히 파악하여 작성해야 합니다.
+
+컬럼: No, 화면명(이미지 뎁스 반영), UI요소, 타입, 기능상세, 정책. 
+(쓸데없는 설명이나 마크다운 코드블럭 기호(```) 없이 표만 출력할 것)"""
+
+PROMPT_TC = """첨부된 {count}장의 UI 이미지는 순서대로 이어지는 유저 플로우(화면 이동, 팝업 노출 등)를 나타냅니다.
+이 흐름을 분석하여 결함 없는 테스트 케이스(TC)를 단 하나의 Markdown 표로 작성하세요.
+단일 화면이 아닌 '화면 간의 상호작용 및 예외/에지 케이스'를 집요하게 파고들어 작성해야 합니다.
+
+컬럼: ID, 화면구분, 테스트 항목, 사전 조건, 테스트 스텝(흐름 반영), 기대 결과. 
+(쓸데없는 설명이나 마크다운 코드블럭 기호(```) 없이 표만 출력할 것)"""
+
+PROMPT_VERIFY_SPEC = """다음 [기획 정책]과 순서대로 첨부된 {count}장의 [UI 이미지 플로우]를 교차 검증하여 기능 명세서를 Markdown 표로 작성하세요.
+이미지는 순차적인 화면 변화를 나타냅니다. 정책과 이미지 흐름을 맵핑하여 일치하는지 분석하세요.
+
+[정책]
+{req_text}
+
+컬럼: No, 화면명, UI요소, 타입, 기능상세, 정책(이미지 플로우와 불일치하는 결함 지적 포함).
+(쓸데없는 설명이나 마크다운 기호 없이 표만 출력할 것)"""
+
+PROMPT_VERIFY_TC = """다음 [기획 정책]과 순서대로 첨부된 {count}장의 [UI 이미지 플로우]를 교차 검증하여 테스트 케이스(TC)를 Markdown 표로 작성하세요.
+이미지의 순서(상태 변화, 팝업 등)와 정책을 바탕으로 극단적 예외 케이스까지 도출하세요.
+
+[정책]
+{req_text}
+
+컬럼: ID, 화면구분, 테스트 항목, 사전 조건, 테스트 스텝(이미지 흐름 기반), 기대 결과.
+(쓸데없는 설명이나 마크다운 기호 없이 표만 출력할 것)"""
+
+# ==========================================
+# 6. 메인 UI
 # ==========================================
 def main():
     init_app()
@@ -221,13 +255,13 @@ def main():
         
         c1, c2 = st.columns(2)
         if c1.button("📄 기능 명세서 뽑기", use_container_width=True, type="primary"):
-            prompt = "첨부된 UI 이미지들을 분석하여 기능 명세서를 Markdown 표로 작성해. 컬럼: No, 화면명, UI요소, 타입, 기능상세, 정책. 쓸데없는 설명 없이 마크다운 표만 출력해."
+            prompt = PROMPT_SPEC.format(count=len(st.session_state['tab1_imgs']))
             with st.spinner("명세서 뽑는 중..."):
                 res = generate_content_safe(model_t1, gemini_key, claude_key, prompt, st.session_state['tab1_imgs'])
                 if res: st.session_state['tab1_res'] = res
                     
         if c2.button("🧪 TC 뽑기", use_container_width=True, type="primary"):
-            prompt = "첨부된 UI 이미지들을 분석하여 테스트 케이스(TC)를 Markdown 표로 작성해. 예외/에지 케이스도 집요하게 포함시켜. 컬럼: ID, 화면구분, 테스트 항목, 사전 조건, 테스트 스텝, 기대 결과. 쓸데없는 설명 없이 마크다운 표만 출력해."
+            prompt = PROMPT_TC.format(count=len(st.session_state['tab1_imgs']))
             with st.spinner("TC 뽑는 중..."):
                 res = generate_content_safe(model_t1, gemini_key, claude_key, prompt, st.session_state['tab1_imgs'])
                 if res: st.session_state['tab1_res'] = res
@@ -265,7 +299,7 @@ def main():
         if c3.button("📄 교차 검증 명세서 뽑기", use_container_width=True, type="primary"):
             if not req_text: st.warning("정책 텍스트를 입력하세요.")
             else:
-                prompt = f"다음 [기획 정책]과 첨부된 [UI 이미지]를 교차 검증하여 기능 명세서를 Markdown 표로 작성해.\n[정책]\n{req_text}\n\n컬럼: No, 화면명, UI요소, 타입, 기능상세, 정책(이미지와 불일치하는 결함 지적 포함). 쓸데없는 설명 없이 표만 출력해."
+                prompt = PROMPT_VERIFY_SPEC.format(count=len(st.session_state['tab2_imgs']), req_text=req_text)
                 with st.spinner("명세서 뽑는 중..."):
                     res = generate_content_safe(model_t2, gemini_key, claude_key, prompt, st.session_state['tab2_imgs'])
                     if res: st.session_state['tab2_res'] = res
@@ -273,7 +307,7 @@ def main():
         if c4.button("🧪 교차 검증 TC 뽑기", use_container_width=True, type="primary"):
             if not req_text: st.warning("정책 텍스트를 입력하세요.")
             else:
-                prompt = f"다음 [기획 정책]과 첨부된 [UI 이미지]를 교차 검증하여 테스트 케이스(TC)를 Markdown 표로 작성해.\n[정책]\n{req_text}\n\n정상 동작뿐만 아니라 극단적 예외 케이스를 집요하게 파고들어. 컬럼: ID, 화면구분, 테스트 항목, 사전 조건, 테스트 스텝, 기대 결과. 쓸데없는 설명 없이 표만 출력해."
+                prompt = PROMPT_VERIFY_TC.format(count=len(st.session_state['tab2_imgs']), req_text=req_text)
                 with st.spinner("TC 뽑는 중..."):
                     res = generate_content_safe(model_t2, gemini_key, claude_key, prompt, st.session_state['tab2_imgs'])
                     if res: st.session_state['tab2_res'] = res
