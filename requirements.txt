@@ -1,7 +1,7 @@
 streamlit
 pandas
 Pillow
-google-generativeai
+google-generativeai>=0.7.2
 anthropic
 streamlit-paste-button
 xlsxwriter
