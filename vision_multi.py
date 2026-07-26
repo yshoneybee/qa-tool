@@ -18,7 +18,6 @@ def md_to_excel(md_str):
         for line in lines:
             line = line.strip()
             if not line or '|' not in line: continue
-            # 마크다운 구분선(|---|---|) 제외
             content = line.replace('|', '').strip()
             if set(content).issubset({'-', ':', ' '}): continue
             data_lines.append(line)
@@ -90,7 +89,38 @@ def generate_content(model, gemini_key, claude_key, prompt, images):
         return run_gemini(gemini_key, prompt, images)
 
 # ==========================================
-# 3. 메인 UI
+# 3. 결과 출력 컴포넌트 (엑셀 + 복붙 영역)
+# ==========================================
+def display_results(result_text, key_prefix):
+    st.success("✅ 추출 완료!")
+    
+    # 엑셀 다운로드 버튼
+    excel_data = md_to_excel(result_text)
+    if excel_data:
+        st.download_button(
+            "📊 엑셀 파일로 다운로드", 
+            data=excel_data, 
+            file_name="기획_TC_추출결과.xlsx", 
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+            key=f"{key_prefix}_dl"
+        )
+    
+    st.divider()
+    
+    # 좌우 단 나누기 (좌: 미리보기 / 우: 복붙 전용 텍스트)
+    col_preview, col_copy = st.columns(2)
+    
+    with col_preview:
+        st.markdown("### 👀 화면 미리보기")
+        st.markdown(result_text)
+        
+    with col_copy:
+        st.markdown("### 📋 복사(Ctrl+C) 전용 텍스트")
+        st.caption("아래 입력창 안을 클릭하고 `Ctrl+A` (전체선택) 후 `Ctrl+C` 하시면 깔끔하게 복사됩니다.")
+        st.text_area("결과 텍스트", value=result_text, height=400, key=f"{key_prefix}_copy", label_visibility="collapsed")
+
+# ==========================================
+# 4. 메인 UI
 # ==========================================
 def main():
     init_app()
@@ -139,11 +169,7 @@ def main():
                 except Exception as e: st.error(e)
 
         if st.session_state['tab1_res']:
-            st.success("완료!")
-            excel_data = md_to_excel(st.session_state['tab1_res'])
-            if excel_data:
-                st.download_button("📊 엑셀로 다운로드", data=excel_data, file_name="초안결과.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl1")
-            st.markdown(st.session_state['tab1_res'])
+            display_results(st.session_state['tab1_res'], "tab1")
 
     # ------------------------------------------
     # TAB 2: 정책 + 이미지 모드
@@ -191,11 +217,7 @@ def main():
                     except Exception as e: st.error(e)
 
         if st.session_state['tab2_res']:
-            st.success("완료!")
-            excel_data = md_to_excel(st.session_state['tab2_res'])
-            if excel_data:
-                st.download_button("📊 엑셀로 다운로드", data=excel_data, file_name="교차검증결과.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl2")
-            st.markdown(st.session_state['tab2_res'])
+            display_results(st.session_state['tab2_res'], "tab2")
 
 if __name__ == "__main__":
     main()
