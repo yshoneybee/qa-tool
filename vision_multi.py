@@ -43,7 +43,7 @@ def md_to_excel(md_str):
 # ==========================================
 def init_app():
     st.set_page_config(page_title="실무 기획/QA 추출기", layout="wide")
-    st.title("⚡ 실무 기획 & TC 추출기 v9")
+    st.title("⚡ 실무 기획 & TC 추출기 v10")
     
     if 'tab1_imgs' not in st.session_state: st.session_state['tab1_imgs'] = []
     if 'tab1_res' not in st.session_state: st.session_state['tab1_res'] = None
@@ -71,11 +71,37 @@ def display_images_with_delete(state_key):
                     st.rerun()
 
 # ==========================================
-# 3. AI 호출 로직 (API 변경점 반영: -latest 꼬리표 강제)
+# 3. AI 호출 로직 (404 원천 차단: 동적 모델 탐색)
 # ==========================================
-def run_gemini(api_key, prompt, images=[], model_name="gemini-1.5-flash-latest"):
+def run_gemini(api_key, prompt, images=[], model_type="flash"):
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_name)
+    
+    # 1. 섭님 API 키로 사용 가능한 전체 모델 목록 조회
+    available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+    target_model = None
+    search_keyword = "1.5-pro" if model_type == "pro" else "1.5-flash"
+    
+    # 2. 하드코딩 없이 목록에서 존재하는 모델 이름을 정확히 스캔해서 픽업
+    for m in available_models:
+        if search_keyword in m:
+            target_model = m.replace("models/", "")
+            break
+            
+    # 혹시 1.5 버전이 없으면 그냥 pro/flash 단어 들어간 거 픽업
+    if not target_model:
+        for m in available_models:
+            if model_type in m:
+                target_model = m.replace("models/", "")
+                break
+                
+    # 그래도 없으면 접근 가능한 첫 번째 모델 강제 할당 (404 에러 방어)
+    if not target_model and available_models:
+        target_model = available_models[0].replace("models/", "")
+        
+    if not target_model:
+        raise Exception(f"API 키로 접근할 수 있는 모델이 아예 없습니다. (목록: {available_models})")
+        
+    model = genai.GenerativeModel(target_model)
     response = model.generate_content([prompt] + images)
     return response.text
 
@@ -111,24 +137,21 @@ def generate_content_safe(model_choice, gemini_key, claude_key, prompt, images):
             if not gemini_key: 
                 st.warning("🚨 왼쪽 사이드바에 Gemini API 키를 입력하세요.")
                 return None
-            # 구글 최신 규격 반영 (-latest)
-            return run_gemini(gemini_key, prompt, images, model_name="gemini-1.5-pro-latest")
+            # 동적 탐색 (Pro)
+            return run_gemini(gemini_key, prompt, images, model_type="pro")
         else: 
             if not gemini_key: 
                 st.warning("🚨 왼쪽 사이드바에 Gemini API 키를 입력하세요.")
                 return None
-            # 구글 최신 규격 반영 (-latest)
-            return run_gemini(gemini_key, prompt, images, model_name="gemini-1.5-flash-latest")
+            # 동적 탐색 (Flash)
+            return run_gemini(gemini_key, prompt, images, model_type="flash")
             
     except Exception as e:
         error_msg = str(e)
         if "429" in error_msg or "quota" in error_msg.lower():
-            st.error("🚨 [무료 한도 초과] AI가 허용된 용량(또는 분당 요청 횟수)을 초과했습니다. 1~2분 뒤에 시도하시거나, 더 가벼운 Flash 모델을 선택해주세요.")
-        elif "401" in error_msg or "403" in error_msg or "authentication" in error_msg.lower() or "credit" in error_msg.lower():
-            st.error("🚨 [인증 실패] API 키가 잘못되었거나 계정에 충전된 크레딧이 없습니다.")
-        elif "404" in error_msg:
-            # 멍청한 하드코딩 제거, 실제 에러 원인 표출
-            st.error(f"🚨 [구글 API 연결 실패] 해당 모델을 구글 서버에서 찾을 수 없습니다. (원문: {error_msg})")
+            st.error("🚨 [무료 한도 초과] AI가 허용된 용량을 초과했습니다. 1~2분 뒤에 시도하시거나 Flash 모델을 선택해주세요.")
+        elif "401" in error_msg or "403" in error_msg or "authentication" in error_msg.lower():
+            st.error("🚨 [인증 실패] API 키가 잘못되었거나 만료되었습니다.")
         else:
             st.error(f"🚨 에러 발생: {error_msg}")
         return None
@@ -147,11 +170,11 @@ def display_results(result_text, key_prefix):
             key=f"{key_prefix}_dl"
         )
     st.divider()
-    col_preview, col_copy = st.columns(2)
+    col_preview, col_col_copy = st.columns(2)
     with col_preview:
         st.markdown("### 👀 화면 미리보기")
         st.markdown(result_text)
-    with col_copy:
+    with col_col_copy:
         st.markdown("### 📋 복사(Ctrl+C) 전용 텍스트")
         st.caption("아래 입력창 안을 클릭하고 `Ctrl+A` (전체선택) 후 `Ctrl+C` 하시면 깔끔하게 복사됩니다.")
         st.text_area("결과 텍스트", value=result_text, height=400, key=f"{key_prefix}_copy", label_visibility="collapsed")
@@ -168,7 +191,6 @@ def main():
 
     tab1, tab2 = st.tabs(["🖼️ 1. 빠른 초안 (이미지 전용)", "📝 2. 정밀 분석 (정책 + 이미지)"])
     
-    # 모델 선택지 공통 리스트
     ai_options = [
         "Claude 3.5 Sonnet (논리력 최강)", 
         "Gemini 1.5 Pro (고성능/한도주의)", 
